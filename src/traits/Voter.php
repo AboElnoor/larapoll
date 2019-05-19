@@ -4,14 +4,15 @@
 namespace Inani\Larapoll\Traits;
 
 
-use Illuminate\Support\Facades\DB;
-use Inani\Larapoll\Exceptions\PollNotSelectedToVoteException;
-use Inani\Larapoll\Exceptions\VoteInClosedPollException;
-use Inani\Larapoll\Guest;
-use Inani\Larapoll\Option;
 use Inani\Larapoll\Poll;
 use Inani\Larapoll\Vote;
+use Inani\Larapoll\Guest;
+use Inani\Larapoll\Option;
 use InvalidArgumentException;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Cookie;
+use Inani\Larapoll\Exceptions\VoteInClosedPollException;
+use Inani\Larapoll\Exceptions\PollNotSelectedToVoteException;
 
 trait Voter
 {
@@ -73,9 +74,24 @@ trait Voter
                 ]);
             });
 
+            $votedPolls = $this->addVotedPollToCookies();
+            Cookie::queue(cookie()->forever('votedPolls', $votedPolls));
+
             return true;
         }
         return !is_null($this->options()->sync($options, false)['attached']);
+    }
+
+    public function getVotedPollsFromCookies(): array
+    {
+        return json_decode(Cookie::get('votedPolls', '{}'), true);
+    }
+
+    public function addVotedPollToCookies(): string
+    {
+        $votedPolls = $this->getVotedPollsFromCookies();
+        $votedPolls[] = $this->poll->id;
+        return json_encode($votedPolls);
     }
 
     /**
@@ -89,6 +105,11 @@ trait Voter
         $poll = Poll::findOrFail($poll_id);
 
         if ($poll->canGuestVote()) {
+            $votedPolls = $this->getVotedPollsFromCookies();
+            if (in_array($poll_id, $votedPolls)) {
+                return true;
+            }
+
             $result = DB::table('larapoll_polls')
                 ->selectRaw('count(*) As total')
                 ->join('larapoll_options', 'larapoll_polls.id', '=', 'larapoll_options.poll_id')
